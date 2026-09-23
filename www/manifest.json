@@ -1,0 +1,30 @@
+{
+  "name": "SnapGemini - 即拍即問 AI 相機",
+  "short_name": "SnapGemini",
+  "description": "一鍵拍照直達 Gemini AI 視覺深度分析，極速解讀萬物、文字 OCR、翻譯、解題與熱量分析",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#07080c",
+  "theme_color": "#07080c",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

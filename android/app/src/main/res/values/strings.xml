@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SnapGemini</string>
+    <string name="title_activity_main">SnapGemini</string>
+    <string name="package_name">com.snapgemini.app</string>
+    <string name="custom_url_scheme">com.snapgemini.app</string>
+</resources>

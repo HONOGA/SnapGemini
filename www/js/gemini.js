@@ -1,0 +1,264 @@
+/**
+ * SnapGemini - Gemini API Integration Module
+ * Supports Streaming (SSE), Multimodal Vision, and Follow-up Chats
+ */
+
+class GeminiService {
+  constructor() {
+    this.storageKey = 'snapgemini_api_key';
+    this.modelKey = 'snapgemini_model';
+    this.defaultModel = 'gemini-2.0-flash';
+  }
+
+  getApiKey() {
+    return localStorage.getItem(this.storageKey) || '';
+  }
+
+  setApiKey(key) {
+    localStorage.setItem(this.storageKey, key.trim());
+  }
+
+  getModel() {
+    return localStorage.getItem(this.modelKey) || this.defaultModel;
+  }
+
+  setModel(model) {
+    localStorage.setItem(this.modelKey, model);
+  }
+
+  hasApiKey() {
+    const key = this.getApiKey();
+    return Boolean(key && key.length > 10);
+  }
+
+  /**
+   * 根據選取模式返回專屬的 System Prompt / Instruction
+   */
+  getPromptForMode(mode, customPrompt = '') {
+    const prompts = {
+      identify: `請以「專家視角」詳細分析這張圖片：
+1. **主要辨識**：明確指出圖中的主體是什麼（如生物品種、物品型號、地標建築、藝術品等）。
+2. **關鍵特徵與細節**：描述肉眼可見的重點細節或狀態。
+3. **延伸知識或實用資訊**：提供相關背景故事、使用建議、保養方式或注意事項。
+請使用繁體中文，格式清晰美觀（善用粗體與條列式）。`,
+
+      ocr: `請對這張圖片進行「高精確度 OCR 文字提取與整理」：
+1. **完整提取文字**：將圖片中的所有文字完整摘錄出來（保留原有段落與層次）。
+2. **核心重點摘要**：若內容較長，請在下方用 3~5 個條列點總結核心要點。
+3. **表格/清單整理**：若圖中有表格或清單，請轉換為 Markdown 格式呈現。
+請使用繁體中文輸出。`,
+
+      translate: `請對這張圖片中的所有文字進行「翻譯成流暢繁體中文」：
+1. **逐段/逐句對照**：將圖中外語文字翻譯為繁體中文（台灣習慣用語）。
+2. **專業術語或文化背景補充**：若有特定專有名詞或俚語，請附帶簡短說明。
+請排版整齊，方便閱讀。`,
+
+      solve: `請以「資深解答專家」身份為圖中內容提供解答與分析：
+1. **題目/問題辨識**：清楚說明圖片中的題目或遭遇的故障/錯誤狀態。
+2. **逐步推導與解析**：提供詳細、清晰的步驟或排除方法。
+3. **最終答案/結論**：以醒目的方式標出正確答案或推薦解決方案。
+請使用繁體中文。`,
+
+      nutrition: `請以「專業營養師與美食家」的角度分析圖中餐點/食物：
+1. **菜品辨識**：列出圖中辨識出的所有料理與食材。
+2. **預估熱量與三大營養素**：
+   - 估計總熱量（大卡 kcal）
+   - 碳水化合物、蛋白質、脂肪的大致比例或克數估算
+3. **健康點評與建議**：針對這餐提出營養均衡建議或搭配提醒。
+請使用繁體中文。`,
+
+      custom: customPrompt.trim() ? customPrompt.trim() : '請詳細分析這張圖片，並以繁體中文回答。'
+    };
+
+    return prompts[mode] || prompts.identify;
+  }
+
+  /**
+   * 呼叫 Gemini Vision API 串流分析圖片
+   * @param {string} base64Image - data:image/jpeg;base64,... 格式的圖片字串
+   * @param {string} prompt - 要提問的文字
+   * @param {function} onChunk - 收到串流 chunk 時的回呼函數 (text, fullText)
+   * @param {Array} history - 追問時的歷史對話
+   */
+  async streamAnalyzeImage(base64Image, prompt, onChunk, history = []) {
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
+      throw new Error('MISSING_API_KEY');
+    }
+
+    const model = this.getModel();
+    const cleanBase64 = base64Image.replace(/^data:image\/\w+;base64,/, '');
+    const mimeType = base64Image.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
+    // 建立 Contents 結構
+    const contents = [];
+
+    // 若有歷史紀錄（追問模式）
+    if (history && history.length > 0) {
+      contents.push(...history);
+    } else {
+      // 首次拍照提問
+      contents.push({
+        role: 'user',
+        parts: [
+          {
+            text: prompt
+          },
+          {
+            inline_data: {
+              mime_type: mimeType,
+              data: cleanBase64
+            }
+          }
+        ]
+      });
+    }
+
+    const requestBody = {
+      contents: contents,
+      generationConfig: {
+        temperature: 0.4,
+        topP: 0.95,
+        maxOutputTokens: 2048,
+      }
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        errorData = { error: { message: response.statusText } };
+      }
+      
+      const message = errorData?.error?.message || `HTTP ${response.status}`;
+      if (response.status === 400 && message.includes('API_KEY_INVALID')) {
+        throw new Error('INVALID_API_KEY');
+      } else if (response.status === 429) {
+        throw new Error('QUOTA_EXCEEDED');
+      } else {
+        throw new Error(`API_ERROR: ${message}`);
+      }
+    }
+
+    // 讀取 SSE 串流
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // 保留未完整的最後一行
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data: ')) {
+          const jsonStr = trimmed.substring(6);
+          if (jsonStr === '[DONE]') continue;
+
+          try {
+            const data = JSON.parse(jsonStr);
+            const textChunk = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            if (textChunk) {
+              fullText += textChunk;
+              if (onChunk) {
+                onChunk(textChunk, fullText);
+              }
+            }
+          } catch (err) {
+            console.warn('SSE 解析錯誤:', err, jsonStr);
+          }
+        }
+      }
+    }
+
+    return fullText;
+  }
+
+  /**
+   * 針對同一張圖片進行追問
+   */
+  async streamFollowup(userQuestion, conversationHistory, onChunk) {
+    const apiKey = this.getApiKey();
+    if (!apiKey) throw new Error('MISSING_API_KEY');
+
+    const model = this.getModel();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
+    const newHistory = [
+      ...conversationHistory,
+      {
+        role: 'user',
+        parts: [{ text: userQuestion }]
+      }
+    ];
+
+    const requestBody = {
+      contents: newHistory,
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+      }
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData?.error?.message || `HTTP ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data: ')) {
+          const jsonStr = trimmed.substring(6);
+          try {
+            const data = JSON.parse(jsonStr);
+            const textChunk = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            if (textChunk) {
+              fullText += textChunk;
+              if (onChunk) onChunk(textChunk, fullText);
+            }
+          } catch (err) {}
+        }
+      }
+    }
+
+    return { fullText, updatedHistory: [...newHistory, { role: 'model', parts: [{ text: fullText }] }] };
+  }
+}
+
+// 實例化並掛載到全域
+window.geminiService = new GeminiService();

@@ -1,0 +1,25 @@
+{
+  "name": "snapgemini",
+  "version": "1.0.0",
+  "description": "即拍即問 AI 相機 - 一鍵拍照直達 Gemini 視覺深度分析",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "node build.js && node ./node_modules/@capacitor/cli/bin/capacitor sync android",
+    "cap:open": "node ./node_modules/@capacitor/cli/bin/capacitor open android"
+  },
+  "keywords": [
+    "gemini",
+    "ai",
+    "camera",
+    "pwa",
+    "vision"
+  ],
+  "author": "Antigravity",
+  "license": "MIT",
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2"
+  }
+}
