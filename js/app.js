@@ -594,9 +594,11 @@ class SnapGeminiApp {
     if (tag) {
       const model = window.geminiService.getModel();
       const map = {
-        'gemini-2.0-flash': 'Gemini 2.0 Flash',
-        'gemini-1.5-flash': 'Gemini 1.5 Flash',
-        'gemini-1.5-pro': 'Gemini 1.5 Pro'
+        'gemini-3.6-flash': 'Gemini 3.6 Flash',
+        'gemini-3.7-flash': 'Gemini 3.7 Flash',
+        'gemini-3.0-flash': 'Gemini 3.0 Flash',
+        'gemini-2.5-flash': 'Gemini 2.5 Flash',
+        'gemini-2.5-pro': 'Gemini 2.5 Pro'
       };
       tag.textContent = map[model] || model;
     }

@@ -7,7 +7,7 @@ class GeminiService {
   constructor() {
     this.storageKey = 'snapgemini_api_key';
     this.modelKey = 'snapgemini_model';
-    this.defaultModel = 'gemini-2.0-flash';
+    this.defaultModel = 'gemini-3.6-flash';
   }
 
   getApiKey() {
@@ -19,7 +19,13 @@ class GeminiService {
   }
 
   getModel() {
-    return localStorage.getItem(this.modelKey) || this.defaultModel;
+    let model = localStorage.getItem(this.modelKey) || this.defaultModel;
+    // 自動將過期的 1.5 與 2.0 模型無縫升級為最新的 3.6 Flash
+    if (model === 'gemini-2.0-flash' || model === 'gemini-1.5-flash' || model === 'gemini-1.5-pro' || !model) {
+      model = this.defaultModel;
+      this.setModel(model);
+    }
+    return model;
   }
 
   setModel(model) {
