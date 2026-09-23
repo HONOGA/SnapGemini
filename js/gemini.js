@@ -1,6 +1,6 @@
 /**
  * SnapGemini - Gemini API Integration Module
- * Supports Streaming (SSE), Multimodal Vision, and Follow-up Chats
+ * Supports Streaming (SSE), Multimodal Vision, Auto-Fallback & Key Testing
  */
 
 class GeminiService {
@@ -11,7 +11,7 @@ class GeminiService {
   }
 
   getApiKey() {
-    return localStorage.getItem(this.storageKey) || '';
+    return (localStorage.getItem(this.storageKey) || '').trim();
   }
 
   setApiKey(key) {
@@ -35,6 +35,53 @@ class GeminiService {
   hasApiKey() {
     const key = this.getApiKey();
     return Boolean(key && key.length > 10);
+  }
+
+  /**
+   * 測試 API Key 連線可用性
+   * @param {string} customKey - 可選自訂 Key
+   * @param {string} customModel - 可選自訂模型
+   */
+  async testApiKey(customKey, customModel) {
+    const key = (customKey || this.getApiKey() || '').trim();
+    if (!key) {
+      return { success: false, error: '請先輸入 API Key' };
+    }
+    const model = customModel || this.getModel();
+    const startTime = performance.now();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
+          generationConfig: { maxOutputTokens: 5 }
+        })
+      });
+
+      const elapsed = Math.round(performance.now() - startTime);
+
+      if (response.ok) {
+        return { success: true, latency: elapsed, model };
+      }
+
+      const errorData = await response.json().catch(() => ({}));
+      const message = errorData?.error?.message || `HTTP ${response.status}`;
+
+      if (response.status === 400 && message.includes('API_KEY_INVALID')) {
+        return { success: false, error: 'API Key 無效，請檢查前後是否有空格或缺漏字元', code: 400 };
+      } else if (response.status === 429) {
+        return { success: false, error: '免費配額已滿（429 Rate Limit），請稍候 1 分鐘再試', code: 429 };
+      } else if (response.status === 503 || message.includes('high demand') || message.includes('temporarily')) {
+        return { success: false, error: `Google 此模型伺服器目前尖峰繁忙（503），建議切換為 Gemini 2.5 Flash 或稍後重試`, code: 503 };
+      } else {
+        return { success: false, error: message, code: response.status };
+      }
+    } catch (err) {
+      return { success: false, error: '網路連線失敗，請檢查手機 Wi-Fi 或行動網路' };
+    }
   }
 
   /**
@@ -80,7 +127,7 @@ class GeminiService {
   }
 
   /**
-   * 呼叫 Gemini Vision API 串流分析圖片
+   * 呼叫 Gemini Vision API 串流分析圖片 (內建伺服器尖峰自動降級備用模型)
    * @param {string} base64Image - data:image/jpeg;base64,... 格式的圖片字串
    * @param {string} prompt - 要提問的文字
    * @param {function} onChunk - 收到串流 chunk 時的回呼函數 (text, fullText)
@@ -92,32 +139,27 @@ class GeminiService {
       throw new Error('MISSING_API_KEY');
     }
 
-    const model = this.getModel();
+    const selectedModel = this.getModel();
+    // 備用降級順序，防止尖峰 503 卡住
+    const fallbackList = [
+      selectedModel,
+      'gemini-2.5-flash',
+      'gemini-3.0-flash',
+      'gemini-3.7-flash'
+    ].filter((m, idx, arr) => arr.indexOf(m) === idx);
+
     const cleanBase64 = base64Image.replace(/^data:image\/\w+;base64,/, '');
     const mimeType = base64Image.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
-
-    // 建立 Contents 結構
     const contents = [];
-
-    // 若有歷史紀錄（追問模式）
     if (history && history.length > 0) {
       contents.push(...history);
     } else {
-      // 首次拍照提問
       contents.push({
         role: 'user',
         parts: [
-          {
-            text: prompt
-          },
-          {
-            inline_data: {
-              mime_type: mimeType,
-              data: cleanBase64
-            }
-          }
+          { text: prompt },
+          { inline_data: { mime_type: mimeType, data: cleanBase64 } }
         ]
       });
     }
@@ -131,69 +173,94 @@ class GeminiService {
       }
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
+    let lastError = null;
 
-    if (!response.ok) {
-      let errorData;
+    for (let i = 0; i < fallbackList.length; i++) {
+      const currentModel = fallbackList[i];
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
       try {
-        errorData = await response.json();
-      } catch (e) {
-        errorData = { error: { message: response.statusText } };
-      }
-      
-      const message = errorData?.error?.message || `HTTP ${response.status}`;
-      if (response.status === 400 && message.includes('API_KEY_INVALID')) {
-        throw new Error('INVALID_API_KEY');
-      } else if (response.status === 429) {
-        throw new Error('QUOTA_EXCEEDED');
-      } else {
-        throw new Error(`API_ERROR: ${message}`);
-      }
-    }
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
 
-    // 讀取 SSE 串流
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let fullText = '';
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // 保留未完整的最後一行
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('data: ')) {
-          const jsonStr = trimmed.substring(6);
-          if (jsonStr === '[DONE]') continue;
-
+        if (!response.ok) {
+          let errorData;
           try {
-            const data = JSON.parse(jsonStr);
-            const textChunk = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            if (textChunk) {
-              fullText += textChunk;
-              if (onChunk) {
-                onChunk(textChunk, fullText);
-              }
+            errorData = await response.json();
+          } catch (e) {
+            errorData = { error: { message: response.statusText } };
+          }
+          const message = errorData?.error?.message || `HTTP ${response.status}`;
+
+          // 若為 High demand (503) 且還有備用模型，嘗試下一個備用模型
+          if ((response.status === 503 || message.includes('high demand') || response.status === 404 || message.includes('not found')) && i < fallbackList.length - 1) {
+            console.warn(`模型 ${currentModel} 忙碌，自動切換至備用模型: ${fallbackList[i + 1]}`);
+            if (window.uiController && window.uiController.showToast) {
+              window.uiController.showToast(`伺服器尖峰，自動切換至備用模型 (${fallbackList[i + 1]})`, 'sparkles');
             }
-          } catch (err) {
-            console.warn('SSE 解析錯誤:', err, jsonStr);
+            continue;
+          }
+
+          if (response.status === 400 && message.includes('API_KEY_INVALID')) {
+            throw new Error('INVALID_API_KEY');
+          } else if (response.status === 429) {
+            throw new Error('QUOTA_EXCEEDED');
+          } else if (response.status === 503 || message.includes('high demand')) {
+            throw new Error('HIGH_DEMAND_ERROR: Google 伺服器目前尖峰繁忙，請稍候 10 秒後重試，或在設定切換為其他模型。');
+          } else {
+            throw new Error(`API_ERROR: ${message}`);
           }
         }
+
+        // 讀取 SSE 串流
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let fullText = '';
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('data: ')) {
+              const jsonStr = trimmed.substring(6);
+              if (jsonStr === '[DONE]') continue;
+
+              try {
+                const data = JSON.parse(jsonStr);
+                const textChunk = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                if (textChunk) {
+                  fullText += textChunk;
+                  if (onChunk) onChunk(textChunk, fullText);
+                }
+              } catch (err) {
+                console.warn('SSE 解析錯誤:', err, jsonStr);
+              }
+            }
+          }
+        }
+
+        return fullText;
+
+      } catch (err) {
+        lastError = err;
+        if (i < fallbackList.length - 1 && (err.message.includes('HIGH_DEMAND') || err.message.includes('fetch'))) {
+          continue;
+        }
+        throw err;
       }
     }
 
-    return fullText;
+    throw lastError || new Error('分析連線失敗，請重試');
   }
 
   /**

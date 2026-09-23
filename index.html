@@ -231,10 +231,19 @@
             <label for="input-api-key">Gemini API Key <span class="required">*</span></label>
             <div class="input-with-icon">
               <input type="password" id="input-api-key" placeholder="貼上你的 API Key (AIzaSy...)" autocomplete="off" />
-              <button type="button" id="btn-toggle-key-vis" class="icon-suffix"><i data-lucide="eye"></i></button>
+              <button type="button" id="btn-toggle-key-vis" class="icon-suffix" title="顯示/隱藏"><i data-lucide="eye"></i></button>
             </div>
+            
+            <div class="test-key-row">
+              <button type="button" id="btn-test-key" class="btn-test-key" title="即時測試連線與可用性">
+                <i data-lucide="sparkles"></i>
+                <span id="test-key-btn-text">⚡ 測試 API Key 可用性</span>
+              </button>
+              <div id="test-key-status" class="test-key-status" style="display: none;"></div>
+            </div>
+
             <p class="form-help">
-              Key 只會儲存在您手機本地瀏覽器（localStorage），直接呼叫 Google 官方，不經第三方伺服器。
+              Key 只會儲存在您手機本地（localStorage），直接連線 Google 官方。
               <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">免費獲取 Key ↗</a>
             </p>
           </div>

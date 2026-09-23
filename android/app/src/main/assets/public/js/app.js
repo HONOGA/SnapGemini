@@ -138,6 +138,10 @@ class SnapGeminiApp {
     if (settingsBtn) settingsBtn.addEventListener('click', () => this.openSettings());
     if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', () => this.closeSettings());
     if (saveSettingsBtn) saveSettingsBtn.addEventListener('click', () => this.saveSettings());
+    
+    const testKeyBtn = document.getElementById('btn-test-key');
+    if (testKeyBtn) testKeyBtn.addEventListener('click', () => this.handleTestApiKey());
+
     if (toggleKeyVisBtn) {
       toggleKeyVisBtn.addEventListener('click', () => {
         const keyInput = document.getElementById('input-api-key');
@@ -553,7 +557,55 @@ class SnapGeminiApp {
     if (hapticsCheck) hapticsCheck.checked = localStorage.getItem('snapgemini_haptics') !== 'false';
     if (autoTtsCheck) autoTtsCheck.checked = localStorage.getItem('snapgemini_auto_tts') === 'true';
 
+    const testStatus = document.getElementById('test-key-status');
+    if (testStatus) testStatus.style.display = 'none';
+
     if (modal) modal.style.display = 'flex';
+  }
+
+  async handleTestApiKey() {
+    const keyInput = document.getElementById('input-api-key');
+    const modelSelect = document.getElementById('select-model');
+    const testBtn = document.getElementById('btn-test-key');
+    const testBtnText = document.getElementById('test-key-btn-text');
+    const statusDiv = document.getElementById('test-key-status');
+
+    const key = keyInput?.value?.trim();
+    if (!key) {
+      if (statusDiv) {
+        statusDiv.style.display = 'flex';
+        statusDiv.className = 'test-key-status error';
+        statusDiv.innerHTML = '<span>❌ 請先貼上 API Key 後再點擊測試</span>';
+      }
+      return;
+    }
+
+    const model = modelSelect?.value || 'gemini-3.6-flash';
+
+    if (testBtn) testBtn.classList.add('testing');
+    if (testBtnText) testBtnText.textContent = '連線測試中...';
+    if (statusDiv) {
+      statusDiv.style.display = 'flex';
+      statusDiv.className = 'test-key-status warning';
+      statusDiv.innerHTML = '<span>⏳ 正在連線 Google Gemini 伺服器驗證...</span>';
+    }
+
+    const result = await window.geminiService.testApiKey(key, model);
+
+    if (testBtn) testBtn.classList.remove('testing');
+    if (testBtnText) testBtnText.textContent = '⚡ 測試 API Key 可用性';
+
+    if (statusDiv) {
+      statusDiv.style.display = 'flex';
+      if (result.success) {
+        statusDiv.className = 'test-key-status success';
+        statusDiv.innerHTML = `<span>✅ <strong>API Key 連線成功！</strong><br><small>模型：${result.model} ｜ 延遲：${result.latency}ms</small></span>`;
+        window.uiController.showToast('API Key 測試成功且連線順暢！', 'check');
+      } else {
+        statusDiv.className = 'test-key-status error';
+        statusDiv.innerHTML = `<span>❌ <strong>連線失敗</strong>：${result.error}</span>`;
+      }
+    }
   }
 
   closeSettings() {
